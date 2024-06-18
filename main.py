@@ -9,11 +9,10 @@ def main():
     """
     try:
         # Usage example
-        serial_no_z = str('28252438')
         serial_no_x = str('27263196')
         serial_no_y = str('27263127') 
 
-        mask_motor = KCube_Controller.MaskMotor(serial_no_z, serial_no_x, serial_no_y)
+        mask_motor = KCube_Controller.MaskMotor(serial_no_x, serial_no_y)
         mask_motor.ConnectAllMotors()
 
         mask_motor.SetAllParameters(step_size=0.050)
