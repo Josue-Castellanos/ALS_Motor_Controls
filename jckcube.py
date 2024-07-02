@@ -5,12 +5,14 @@ import clr
 clr.AddReference("C:\\Program Files\\Thorlabs\\Kinesis\\Thorlabs.MotionControl.DeviceManagerCLI.dll")
 clr.AddReference("C:\\Program Files\\Thorlabs\\Kinesis\\Thorlabs.MotionControl.GenericMotorCLI.dll")
 clr.AddReference("C:\\Program Files\\Thorlabs\\Kinesis\\Thorlabs.MotionControl.KCube.DCServoCLI.dll")
+clr.AddReference("C:\\Program Files\\Thorlabs\\Kinesis\\Thorlabs.MotionControl.KCube.BrushlessMotorCLI.dll")
 
 # Import the namespaces from the Thorlabs Kinesis DLLs
 from Thorlabs.MotionControl.DeviceManagerCLI import *         
 from Thorlabs.MotionControl.GenericMotorCLI import *            
 from Thorlabs.MotionControl.GenericMotorCLI.ControlParameters import JogParametersBase
-from Thorlabs.MotionControl.KCube.DCServoCLI import *           
+from Thorlabs.MotionControl.KCube.DCServoCLI import *  
+from Thorlabs.MotionControl.KCube.BrushlessMotorCLI import *         
 from System import Decimal
 
 # Initialize the DeviceManager
@@ -19,16 +21,19 @@ DeviceManagerCLI.BuildDeviceList()
 # 
 class MaskMotor:
     def __init__(self, serial_no_x, serial_no_y, serial_no_z):
-        self.serial_no_z = serial_no_z
         self.serial_no_x = serial_no_x
         self.serial_no_y = serial_no_y
-        self.motor_z = None
+        self.serial_no_z = serial_no_z
         self.motor_x = None
         self.motor_y = None
+        self.motor_z = None
 
     def ConnectMotor(self, serial_no):
         try:
-            motor = KCubeDCServo.CreateKCubeDCServo(serial_no)
+            if serial_no == str('28252438'):
+                motor = KCubeBrushlessMotor.CreateKCubeBrushlessMotor(serial_no)
+            else:
+                motor = KCubeDCServo.CreateKCubeDCServo(serial_no)
 
             # If Serial Number is assigned connect motor
             if not motor == None:
@@ -36,7 +41,7 @@ class MaskMotor:
 
                 # Wait for the device settings to initialize
                 if not motor.IsSettingsInitialized():
-                    motor.WaitForSettingsInitialized(5000)  # 5 seconds timeout
+                    motor.WaitForSettingsInitialized(10000)  # 10 seconds timeout
                     assert motor.IsSettingsInitialized() is True
 
                 # Start Polling the Device
@@ -48,23 +53,24 @@ class MaskMotor:
                 time.sleep(.1)
 
                 # Load and Update motor configuration
-                config = motor.LoadMotorConfiguration(serial_no, DeviceConfiguration.DeviceSettingsUseOptionType.UseFileSettings)
-                if serial_no == self.serial_no_z:
-                    config.DeviceSettingsName = str('DDSO50') # Optics stage 
+
+                if serial_no == str('28252438'):
+                    config = motor.LoadMotorConfiguration(serial_no, DeviceConfiguration.DeviceSettingsUseOptionType.UseDeviceSettings)
+                    config.DeviceSettingsName = str('DDS050') # Optics stage 
                 else:
+                    config = motor.LoadMotorConfiguration(serial_no, DeviceConfiguration.DeviceSettingsUseOptionType.UseFileSettings)
                     config.DeviceSettingsName = str('MTS50-Z8') # Mask Stage
                 config.UpdateCurrentConfiguration()
                 motor.SetSettings(motor.MotorDeviceSettings, True, False)
             
         except Exception as e:
             print(e)
-            quit()
         return motor
 
     def ConnectAllMotors(self):
-        self.motor_z = self.ConnectMotor(self.serial_no_z)
         self.motor_x = self.ConnectMotor(self.serial_no_x)
         self.motor_y = self.ConnectMotor(self.serial_no_y)
+        self.motor_z = self.ConnectMotor(self.serial_no_z)
 
     def SetVelocityParams(self, motor, max_velocity, acceleration):
         vel_params = motor.GetVelocityParams()
@@ -90,9 +96,9 @@ class MaskMotor:
         print(f"Motor parameters set: Stop Mode={stop_mode}, Backlash Distance={backlash_distance} mm")
 
     def SetAllParameters(self, step_size):
-        self.SetJogParams(self.motor_z, step_size)
         self.SetJogParams(self.motor_x, step_size)
         self.SetJogParams(self.motor_y, step_size)
+        self.SetJogParams(self.motor_z, step_size)
 
     def MoveMotor(self, motor, position, axis_name):
         print(f"Moving {axis_name} axis to position {position}...")
@@ -104,13 +110,13 @@ class MaskMotor:
         print(f"{axis_name} axis move completed.")
 
     def MoveAllMotors(self, position_x, position_y, position_z):
-        self.MoveMotor(self.motor_z, position_z, "Z")
         self.MoveMotor(self.motor_x, position_x, "X")
         self.MoveMotor(self.motor_y, position_y, "Y")
+        self.MoveMotor(self.motor_z, position_z, "Z")
 
-    def BackwardJogMotor(self, motor):
+    def ForwardJogMotor(self, motor):
         print(f"Jogging Forward with step size (enter step size here)...")
-        motor.MoveJog(MotorDirection.Backward, 60000) # Wait time in milliseconds
+        motor.MoveJog(MotorDirection.Forward, 60000) # Wait time in milliseconds
 
     def JogAllMotors(self):
         self.ForwardJogMotor(self.motor_z)
@@ -120,9 +126,9 @@ class MaskMotor:
         motor.Disconnect(False)
 
     def DisconnectAllMotors(self):
-        self.DisconnectMotor(self.motor_z)
         self.DisconnectMotor(self.motor_x)
         self.DisconnectMotor(self.motor_y)
+        self.DisconnectMotor(self.motor_z)
 
 
 
