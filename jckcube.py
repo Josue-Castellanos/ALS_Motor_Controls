@@ -1,39 +1,42 @@
 import time
 import clr 
 
-# Add reference to the Thorlabs Kinesis DLLs (Dynaimic-Link Libraries)
+# Add reference to the Thorlabs Kinesis DLLs (Dynamic-Link Libraries)
 clr.AddReference("C:\\Program Files\\Thorlabs\\Kinesis\\Thorlabs.MotionControl.DeviceManagerCLI.dll")
 clr.AddReference("C:\\Program Files\\Thorlabs\\Kinesis\\Thorlabs.MotionControl.GenericMotorCLI.dll")
 clr.AddReference("C:\\Program Files\\Thorlabs\\Kinesis\\Thorlabs.MotionControl.KCube.DCServoCLI.dll")
 clr.AddReference("C:\\Program Files\\Thorlabs\\Kinesis\\Thorlabs.MotionControl.KCube.BrushlessMotorCLI.dll")
 
 # Import the namespaces from the Thorlabs Kinesis DLLs
-from Thorlabs.MotionControl.DeviceManagerCLI import *         
-from Thorlabs.MotionControl.GenericMotorCLI import *            
-from Thorlabs.MotionControl.GenericMotorCLI.ControlParameters import JogParametersBase
-from Thorlabs.MotionControl.KCube.DCServoCLI import *  
-from Thorlabs.MotionControl.KCube.BrushlessMotorCLI import *         
-from System import Decimal
+from Thorlabs.MotionControl.DeviceManagerCLI import *          # type: ignore
+from Thorlabs.MotionControl.GenericMotorCLI import *             # type: ignore
+from Thorlabs.MotionControl.GenericMotorCLI.ControlParameters import JogParametersBase # type: ignore
+from Thorlabs.MotionControl.KCube.DCServoCLI import *   # type: ignore
+from Thorlabs.MotionControl.KCube.BrushlessMotorCLI import *          # type: ignore
+from System import Decimal # type: ignore
 
 # Initialize the DeviceManager
-DeviceManagerCLI.BuildDeviceList()
+DeviceManagerCLI.BuildDeviceList() # type: ignore
 
-# 
 class MaskMotor:
-    def __init__(self, serial_no_x, serial_no_y, serial_no_z):
+    def __init__(self, serial_no_x, serial_no_y, serial_no_z, log_signal=None):
         self.serial_no_x = serial_no_x
         self.serial_no_y = serial_no_y
         self.serial_no_z = serial_no_z
         self.motor_x = None
         self.motor_y = None
         self.motor_z = None
+        self.log_signal = log_signal if log_signal else print
+
+    def log(self, level, component, message, details=""):
+        self.log_signal(level, component, message, details)
 
     def ConnectMotor(self, serial_no):
         try:
             if serial_no == str('28252438'):
-                motor = KCubeBrushlessMotor.CreateKCubeBrushlessMotor(serial_no)
+                motor = KCubeBrushlessMotor.CreateKCubeBrushlessMotor(serial_no) # type: ignore
             else:
-                motor = KCubeDCServo.CreateKCubeDCServo(serial_no)
+                motor = KCubeDCServo.CreateKCubeDCServo(serial_no) # type: ignore
 
             # If Serial Number is assigned connect motor
             if not motor == None:
@@ -55,16 +58,18 @@ class MaskMotor:
                 # Load and Update motor configuration
 
                 if serial_no == str('28252438'):
-                    config = motor.LoadMotorConfiguration(serial_no, DeviceConfiguration.DeviceSettingsUseOptionType.UseDeviceSettings)
+                    config = motor.LoadMotorConfiguration(serial_no, DeviceConfiguration.DeviceSettingsUseOptionType.UseDeviceSettings) # type: ignore
                     config.DeviceSettingsName = str('DDS050') # Optics stage 
                 else:
-                    config = motor.LoadMotorConfiguration(serial_no, DeviceConfiguration.DeviceSettingsUseOptionType.UseFileSettings)
+                    config = motor.LoadMotorConfiguration(serial_no, DeviceConfiguration.DeviceSettingsUseOptionType.UseFileSettings) # type: ignore
                     config.DeviceSettingsName = str('MTS50-Z8') # Mask Stage
                 config.UpdateCurrentConfiguration()
                 motor.SetSettings(motor.MotorDeviceSettings, True, False)
+                self.log("INFO", "MotorControl", f"Motor {serial_no} connected", f"Stage {config.DeviceSettingsName}")
+
             
         except Exception as e:
-            print(e)
+            self.log("ERROR", "MotorControl", "Failed to connect motor", str(e))
         return motor
 
     def ConnectAllMotors(self):
@@ -72,28 +77,30 @@ class MaskMotor:
         self.motor_y = self.ConnectMotor(self.serial_no_y)
         self.motor_z = self.ConnectMotor(self.serial_no_z)
 
+    def GetPosition(self, motor):
+        position = motor.Position
+        return position
+
     def SetVelocityParams(self, motor, max_velocity, acceleration):
         vel_params = motor.GetVelocityParams()
         vel_params.MaxVelocity = max_velocity
         vel_params.Acceleration = acceleration
         motor.SetVelParams(vel_params)
-        print(f"Velocity parameters set: Max Velocity={max_velocity} mm/s, Acceleration={acceleration} mm/s^2")
+        self.log("INFO", "MotorControl", "Velocity parameters set", f"Max Velocity={max_velocity} mm/s, Acceleration={acceleration} mm/s^2")
 
     def SetJogParams(self, motor, step_size):
         jog_params = motor.GetJogParams()
         jog_params.StepSize = Decimal(step_size)
-        jog_params.JogVelocity = Decimal(2)
-        jog_params.JogAcceleration = Decimal(1)
         jog_params.JogMode = JogParametersBase.JogModes.SingleStep
         motor.SetJogParams(jog_params)
-        print(f"Jog parameters set: Step Size={step_size} mm, Velocity=2.4 mm/s, Acceleration=1.5 mm/s^2, Mode=SingleStep")
+        self.log("INFO", "MotorControl", "Jog parameters set", f"Step Size={step_size} mm, Mode=SingleStep")
 
     def SetMotorParams(self, motor, stop_mode, backlash_distance):
         motor_params = motor.GetMotorParams()
         motor_params.StopMode = stop_mode
         motor_params.BacklashCompensation = backlash_distance
         motor.SetMotorParams(motor_params)
-        print(f"Motor parameters set: Stop Mode={stop_mode}, Backlash Distance={backlash_distance} mm")
+        self.log("INFO", "MotorControl", "Motor parameters set", f"Stop Mode={stop_mode}, Backlash Distance={backlash_distance} mm")
 
     def SetAllParameters(self, step_size):
         self.SetJogParams(self.motor_x, step_size)
@@ -101,13 +108,13 @@ class MaskMotor:
         self.SetJogParams(self.motor_z, step_size)
 
     def MoveMotor(self, motor, position, axis_name):
-        print(f"Moving {axis_name} axis to position {position}...")
+        self.log("INFO", "MotorControl", "Moving motor", f"Axis={axis_name}, Position={position} mm")
         motor.MoveTo(Decimal(position), 60000)  # 60 seconds timeout in milliseconds
 
         # Wait for the device to complete the move
         while motor.Status.IsMoving:
             time.sleep(0.1)  # Check every 100ms
-        print(f"{axis_name} axis move completed.")
+        self.log("INFO", "MotorControl", "Motor move completed", f"Axis={axis_name}")
 
     def MoveAllMotors(self, position_x, position_y, position_z):
         self.MoveMotor(self.motor_x, position_x, "X")
@@ -115,11 +122,14 @@ class MaskMotor:
         self.MoveMotor(self.motor_z, position_z, "Z")
 
     def ForwardJogMotor(self, motor):
-        print(f"Jogging Forward with step size (enter step size here)...")
-        motor.MoveJog(MotorDirection.Forward, 60000) # Wait time in milliseconds
+        self.log("INFO", "MotorControl", "Jogging motor forward", "")
+        motor.MoveJog(MotorDirection.Forward, 60000) # type: ignore # Wait time in milliseconds
+        self.log("INFO", "MotorControl", "Motor jog completed", "Forward")
 
-    def JogAllMotors(self):
-        self.ForwardJogMotor(self.motor_z)
+    def BackwardJogMotor(self, motor):
+        self.log("INFO", "MotorControl", "Jogging motor backward", "")
+        motor.MoveJog(MotorDirection.Backward, 60000) # type: ignore # Wait time in milliseconds
+        self.log("INFO", "MotorControl", "Motor jog completed", "Backward")
 
     def DisconnectMotor(self, motor):
         motor.StopPolling()
@@ -129,10 +139,3 @@ class MaskMotor:
         self.DisconnectMotor(self.motor_x)
         self.DisconnectMotor(self.motor_y)
         self.DisconnectMotor(self.motor_z)
-
-
-
-
-
-
-
