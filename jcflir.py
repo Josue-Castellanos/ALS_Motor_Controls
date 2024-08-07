@@ -262,6 +262,15 @@ class Camera:
             if not PySpin.IsReadable(node_gain) or not PySpin.IsWritable(node_gain):
                 self.log("ERROR", "Camera", "Unable to set gain node")
 
+            # Get the minimum and maximum allowable gain values
+            gain_min = node_gain.GetMin()
+            gain_max = node_gain.GetMax()
+
+            # Ensure the gain value is within the allowable range
+            if gain_value < gain_min or gain_value > gain_max:
+                self.log("WARNING", "Camera", f"Gain value {gain_value} is out of range", f"Adjust to fit within {gain_min} - {gain_max}.")
+                gain_value = max(min(gain_value, gain_max), gain_min)
+                
             node_gain.SetValue(gain_value)
             self.log("INFO", "Camera", f"Gain set to {gain_value}")
             return True
@@ -283,6 +292,14 @@ class Camera:
             if not PySpin.IsReadable(node_exposure_time) or not PySpin.IsWritable(node_exposure_time):
                 self.log("ERROR", "Camera", "Unable to set exposure time")
                 return False
+            
+            # Get the minimum and maximum allowable exposure time values
+            exposure_min = node_exposure_time.GetMin()
+            exposure_max = node_exposure_time.GetMax()
+
+            if exposure_time < exposure_min or exposure_time > exposure_max:
+                self.log("WARNING", "Camera", f"Exposure time value {exposure_time} is out of range", f"Adjust to fit within {exposure_min} - {exposure_max}")
+                exposure_time = max(min(exposure_time, exposure_max), exposure_min)
             
             # We can check if the exposure time we want is within the limits or not
             node_exposure_time.SetValue(exposure_time)

@@ -1,25 +1,28 @@
 import sys
-import time
 import json
 import PySpin
+import threading
 from jckcube import MaskMotor
 from jcflir import Camera
-from PyQt5.QtWidgets import QApplication, QMainWindow, QLabel, QVBoxLayout, QWidget, QComboBox, QHBoxLayout, QLineEdit, QPushButton, QStackedWidget, QTableWidget, QTableWidgetItem, QHeaderView, QGroupBox, QFormLayout
+from PyQt5.QtWidgets import QApplication, QMainWindow, QLabel, QVBoxLayout, QWidget, QHBoxLayout, QLineEdit, QPushButton, QTableWidget, QTableWidgetItem, QHeaderView, QGroupBox, QFormLayout, QGridLayout, QProgressBar
 from PyQt5.QtGui import QImage, QPixmap
-from PyQt5.QtCore import QTimer, Qt
+from PyQt5.QtCore import QTimer, Qt, pyqtSignal
 from datetime import datetime
 
 SETTINGS_FILE = "settings.txt"
 
 class CameraGUI(QMainWindow):
+    # Define a signal for progress updates
+    progress_signal = pyqtSignal(int)
+
     def __init__(self):
         super().__init__()
         self.serial_no_x = str('27263196')
         self.serial_no_y = str('27263127') 
         self.serial_no_z = str('28252438')
 
-        self.setWindowTitle("Camera Control")
-        self.setGeometry(100, 100, 1700, 800)
+        self.setWindowTitle("PX LDRD Motion Control")
+        self.setGeometry(100, 100, 1700, 1000)
 
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
@@ -31,30 +34,8 @@ class CameraGUI(QMainWindow):
         # Left control panel
         self.control_panel = QWidget()
         self.control_panel.setFixedWidth(300)  # Set a fixed width for the control panel
-        self.control_layout = QVBoxLayout(self.control_panel)
         self.main_layout.addWidget(self.control_panel)
-
-        # Motor selection
-        self.motor_combo = QComboBox()
-        self.motor_combo.addItems(["X", "Y", "Z"])
-        self.motor_combo.currentIndexChanged.connect(self.ChangeMotor)
-        self.control_layout.addWidget(QLabel("Select Motor:"))
-        self.control_layout.addWidget(self.motor_combo)
-
-        # Mode selection
-        self.mode_combo = QComboBox()
-        self.mode_combo.addItems(["Jog Mode", "Absolute Move", "Scan Mode"])
-        self.mode_combo.currentIndexChanged.connect(self.ChangeMode)
-        self.control_layout.addWidget(self.mode_combo)
-
-        self.mode_stack = QStackedWidget()
-        self.control_layout.addWidget(self.mode_stack)
-
-        # Initialize mode-specific widgets
-        self.InitJogMode()
-        self.InitAbsoluteMode()
-        self.InitScanMode()
-        self.InitCameraSettings()
+        self.InitControlPanel()
 
         # Right side: Camera stream and info
         self.right_panel = QWidget()
@@ -75,7 +56,7 @@ class CameraGUI(QMainWindow):
         self.image_label.setAlignment(Qt.AlignCenter)
         self.right_layout.addWidget(self.image_label, 1)  # Make the image expandable
 
-        # Info bar below the image
+        # Info bar below the image, I still need to implement the cursor logic for this feature
         self.info_bar = QLabel("Cursor Position: X:0, Y:0 | Zoom Level: 100% | FPS: 0")
         self.right_layout.addWidget(self.info_bar)
 
@@ -86,50 +67,113 @@ class CameraGUI(QMainWindow):
 
         # Default motor
         self.mask_motor = MaskMotor(self.serial_no_x, self.serial_no_y, self.serial_no_z, log_signal=self.log_message)
-        self.motor_combo.setCurrentText("Z")
+        self.InitCameraSettings()
 
-    def InitJogMode(self):
-        jog_widget = QWidget()
-        jog_layout = QVBoxLayout(jog_widget)
+        # Connect the progress signal to the slot method
+        self.progress_signal.connect(self.UpdateProgressBar)
 
-        step_size_layout = QHBoxLayout()
-        step_size_layout.addWidget(QLabel("Step Size (mm):"))
-        self.step_size_input = QLineEdit()
-        step_size_layout.addWidget(self.step_size_input)
-        self.SaveStepSize_btn = QPushButton("Save")
-        self.SaveStepSize_btn.clicked.connect(self.SaveStepSize)
-        step_size_layout.addWidget(self.SaveStepSize_btn)
-        jog_layout.addLayout(step_size_layout)
 
-        jog_buttons_layout = QHBoxLayout()
-        self.jog_backward_btn = QPushButton("◀ Backward")
-        self.jog_backward_btn.clicked.connect(lambda: self.JogMotor("backward"))
-        jog_buttons_layout.addWidget(self.jog_backward_btn)
-        self.jog_forward_btn = QPushButton("Forward ▶")
-        self.jog_forward_btn.clicked.connect(lambda: self.JogMotor("forward"))
-        jog_buttons_layout.addWidget(self.jog_forward_btn)
-        jog_layout.addLayout(jog_buttons_layout)
+    def InitControlPanel(self):
+        control_layout = QVBoxLayout()
+        
+        # Add Start and Stop Buttons
+        self.start_btn = QPushButton("Start")
+        self.stop_btn = QPushButton("Stop")
+        self.stop_btn.setEnabled(False)  # Disable Stop button initially
+        control_layout.addWidget(self.start_btn)
+        control_layout.addWidget(self.stop_btn)
 
-        self.mode_stack.addWidget(jog_widget)
+        # Mask Section (X and Y motors)
+        mask_group = QGroupBox("Mask Control (X and Y)")
+        mask_layout = QVBoxLayout()
 
-    def InitAbsoluteMode(self):
-        abs_widget = QWidget()
-        abs_layout = QVBoxLayout(abs_widget)
+        # X and Y jog controls
+        jog_layout = QGridLayout()
+        
+        # X axis controls
+        self.jog_x_backward_btn = QPushButton("◀ X") 
+        self.jog_x_forward_btn = QPushButton("X ▶")
+        jog_layout.addWidget(self.jog_x_backward_btn, 1, 0)
+        jog_layout.addWidget(self.jog_x_forward_btn, 1, 2)
+        
+        # Y axis controls
+        self.jog_y_backward_btn = QPushButton("▲ Y")
+        self.jog_y_forward_btn = QPushButton("▼ Y")
+        jog_layout.addWidget(self.jog_y_backward_btn, 0, 1)
+        jog_layout.addWidget(self.jog_y_forward_btn, 2, 1)
+        
+        mask_layout.addLayout(jog_layout)
 
-        position_layout = QHBoxLayout()
-        position_layout.addWidget(QLabel("Position (mm):"))
-        self.position_input = QLineEdit()
-        position_layout.addWidget(self.position_input)
-        self.MoveTo_btn = QPushButton("Move")
-        self.MoveTo_btn.clicked.connect(self.MoveTo)
-        position_layout.addWidget(self.MoveTo_btn)
-        abs_layout.addLayout(position_layout)
+        # X and Y absolute move controls
+        abs_layout = QHBoxLayout()
+        
+        x_abs_layout = QHBoxLayout()
+        x_abs_layout.addWidget(QLabel("X:"))
+        self.x_position_input = QLineEdit()
+        x_abs_layout.addWidget(self.x_position_input)
+        self.x_move_btn = QPushButton("Move X")
+        x_abs_layout.addWidget(self.x_move_btn)
+        
+        y_abs_layout = QHBoxLayout()
+        y_abs_layout.addWidget(QLabel("Y:"))
+        self.y_position_input = QLineEdit()
+        y_abs_layout.addWidget(self.y_position_input)
+        self.y_move_btn = QPushButton("Move Y")
+        y_abs_layout.addWidget(self.y_move_btn)
+        
+        abs_layout.addLayout(x_abs_layout)
+        abs_layout.addLayout(y_abs_layout)
+        
+        mask_layout.addLayout(abs_layout)
 
-        self.mode_stack.addWidget(abs_widget)
+        # Step Size Control for X and Y
+        xy_step_size_layout = QHBoxLayout()
+        xy_step_size_layout.addWidget(QLabel("XY Step Size (mm):"))
+        self.xy_step_size_input = QLineEdit()
+        xy_step_size_layout.addWidget(self.xy_step_size_input)
+        self.save_xy_step_size_btn = QPushButton("Save XY")
+        xy_step_size_layout.addWidget(self.save_xy_step_size_btn)
+        mask_layout.addLayout(xy_step_size_layout)
 
-    def InitScanMode(self):
-        scan_widget = QWidget()
-        scan_layout = QVBoxLayout(scan_widget)
+        mask_group.setLayout(mask_layout)
+        control_layout.addWidget(mask_group)
+
+        # Mirror Section (Z motor)
+        mirror_group = QGroupBox("Mirror Control (Z)")
+        mirror_layout = QVBoxLayout()
+
+        # Z jog controls
+        z_jog_layout = QHBoxLayout()
+        self.jog_z_backward_btn = QPushButton("◀ Z")
+        self.jog_z_forward_btn = QPushButton("Z ▶")
+        z_jog_layout.addWidget(self.jog_z_backward_btn)
+        z_jog_layout.addWidget(self.jog_z_forward_btn)
+        mirror_layout.addLayout(z_jog_layout)
+
+        # Z absolute move control
+        z_abs_layout = QHBoxLayout()
+        z_abs_layout.addWidget(QLabel("Z:"))
+        self.z_position_input = QLineEdit()
+        z_abs_layout.addWidget(self.z_position_input)
+        self.z_move_btn = QPushButton("Move Z")
+        z_abs_layout.addWidget(self.z_move_btn)
+        mirror_layout.addLayout(z_abs_layout)
+
+        # Step Size Control for Z
+        z_step_size_layout = QHBoxLayout()
+        z_step_size_layout.addWidget(QLabel("Z Step Size (mm):"))
+        self.z_step_size_input = QLineEdit()
+        z_step_size_layout.addWidget(self.z_step_size_input)
+        self.save_z_step_size_btn = QPushButton("Save Z")
+        z_step_size_layout.addWidget(self.save_z_step_size_btn)
+        mirror_layout.addLayout(z_step_size_layout)
+
+        mirror_group.setLayout(mirror_layout)
+        control_layout.addWidget(mirror_group)
+
+        # Scan Control Section
+        scan_group = QGroupBox("Scan Control")
+        scan_layout = QVBoxLayout()
 
         start_position_layout = QHBoxLayout()
         start_position_layout.addWidget(QLabel("Start Position (mm):"))
@@ -143,184 +187,46 @@ class CameraGUI(QMainWindow):
         target_position_layout.addWidget(self.target_position_input)
         scan_layout.addLayout(target_position_layout)
 
-        step_size_layout = QHBoxLayout()
-        step_size_layout.addWidget(QLabel("Step Size (mm):"))
+        scan_step_size_layout = QHBoxLayout()
+        scan_step_size_layout.addWidget(QLabel("Scan Step Size (mm):"))
         self.scan_step_size_input = QLineEdit()
-        step_size_layout.addWidget(self.scan_step_size_input)
-        scan_layout.addLayout(step_size_layout)
+        scan_step_size_layout.addWidget(self.scan_step_size_input)
+        scan_layout.addLayout(scan_step_size_layout)
 
         self.scan_btn = QPushButton("Start Scan")
-        self.scan_btn.clicked.connect(self.StartScan)
         scan_layout.addWidget(self.scan_btn)
 
-        self.mode_stack.addWidget(scan_widget)
+        # Add a progress bar
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setValue(0)
+        scan_layout.addWidget(self.progress_bar)        
 
-    def InitCameraSettings(self):
-        # Camera Settings
-        self.settings_group = QGroupBox("Camera Settings")
-        self.settings_layout = QFormLayout()
-        self.settings_group.setLayout(self.settings_layout)
+        scan_group.setLayout(scan_layout)
+        control_layout.addWidget(scan_group)
+
+        # Set the control panel layout
+        self.control_panel.setLayout(control_layout)
+
+        # Connect button signals
+        self.jog_x_backward_btn.clicked.connect(lambda: self.JogMotor("X", "backward"))
+        self.jog_x_forward_btn.clicked.connect(lambda: self.JogMotor("X", "forward"))
+        self.jog_y_backward_btn.clicked.connect(lambda: self.JogMotor("Y", "backward"))
+        self.jog_y_forward_btn.clicked.connect(lambda: self.JogMotor("Y", "forward"))
+        self.jog_z_backward_btn.clicked.connect(lambda: self.JogMotor("Z", "backward"))
+        self.jog_z_forward_btn.clicked.connect(lambda: self.JogMotor("Z", "forward"))
         
-        # Gain setting
-        self.gain_input = QLineEdit(str(self.settings['gain']))
-        self.settings_layout.addRow("Gain:", self.gain_input)
-
-        # Exposure time setting
-        self.exposure_input = QLineEdit(str(self.settings['exposure_time']))
-        self.settings_layout.addRow("Exposure Time (μs):", self.exposure_input)
-
-        # Apply settings button
-        self.apply_settings_btn = QPushButton("Apply Settings")
-        self.apply_settings_btn.clicked.connect(self.ApplySettings)
-        self.settings_layout.addRow(self.apply_settings_btn)
-
-        # Add the settings group to the bottom of the control panel
-        self.control_layout.addStretch()
-        self.control_layout.addWidget(self.settings_group)
-
-    def LoadSettings(self):
-        try:
-            with open(SETTINGS_FILE, 'r') as f:
-                return json.load(f)
-        except FileNotFoundError:
-            return {
-                'exposure_time': 0.0003,
-                'gain': 0
-            }
+        self.x_move_btn.clicked.connect(lambda: self.StartMove("X"))
+        self.y_move_btn.clicked.connect(lambda: self.StartMove("Y"))
+        self.z_move_btn.clicked.connect(lambda: self.StartMove("Z"))
         
-    def SaveSettings(self):
-        with open(SETTINGS_FILE, 'w') as f:
-            json.dump(self.settings, f)
+        self.save_xy_step_size_btn.clicked.connect(lambda: self.SaveStepSize("XY"))
+        self.save_z_step_size_btn.clicked.connect(lambda: self.SaveStepSize("Z"))
         
-    def ChangeMode(self, index):
-        self.mode_stack.setCurrentIndex(index)
-
-    def ChangeMotor(self):
-        motor_selection = self.motor_combo.currentText()
-        if motor_selection == "X":
-            self.current_motor = self.mask_motor.motor_x
-        elif motor_selection == "Y":
-            self.current_motor = self.mask_motor.motor_y
-        else:
-            self.current_motor = self.mask_motor.motor_z
-        self.log_message("INFO", "MotorControl", "Motor selection changed", f"Selected Motor: {motor_selection}")
+        self.scan_btn.clicked.connect(self.StartScan)
+        self.start_btn.clicked.connect(self.StartHardware)
+        self.stop_btn.clicked.connect(self.StopHardware)
 
 
-    def SaveStepSize(self):
-        step_size = float(self.step_size_input.text())
-        self.mask_motor.SetJogParams(self.current_motor, step_size)
-        self.log_message("INFO", "MotorControl", "Jog step size updated", f"New step size: {step_size} mm")
-
-    def JogMotor(self, direction):
-        if direction == "forward":
-            self.mask_motor.ForwardJogMotor(self.current_motor)
-            self.log_message("INFO", "MotorControl", "Motor jogged forward", f"Axis: {self.motor_combo.currentText()}")
-        elif direction == 'backward':
-            self.mask_motor.BackwardJogMotor(self.current_motor)
-            self.log_message("INFO", "MotorControl", "Motor jogged backward", f"Axis: {self.motor_combo.currentText()}")
-
-    def MoveTo(self):
-        position = float(self.position_input.text())
-        self.mask_motor.MoveMotor(self.current_motor, position, self.motor_combo.currentText())
-        self.log_message("INFO", "MotorControl", "Motor moved to absolute position", f"Axis: {self.motor_combo.currentText()}, Position: {position} mm")
-
-    def StartScan(self):
-        try:
-            start_position = float(self.start_position_input.text())
-            target_position = float(self.target_position_input.text())
-            step_size = float(self.scan_step_size_input.text())
-
-            # Save step size
-            self.mask_motor.SetJogParams(self.current_motor, step_size)
-            self.log_message("INFO", "ScanMode", "Jog step size set for scan", f"Step size: {step_size} mm")
-
-            self.mask_motor.MoveMotor(self.current_motor, start_position, self.motor_combo.currentText())
-
-            # Calculate the number of steps
-            num_steps = int(abs(target_position - start_position) / step_size)
-
-            # Determine the direction of scan
-            direction = "forward" if target_position > start_position else "backward"
-
-            for step in range(num_steps + 1):
-                current_position = start_position + step * step_size * (1 if direction == "forward" else -1)
-                
-                if direction == "forward":
-                    self.mask_motor.ForwardJogMotor(self.current_motor)
-                else:
-                    self.mask_motor.BackwardJogMotor(self.current_motor)
-
-                self.log_message("INFO", "ScanMode", "Motor jogged to position", f"Position: {current_position} mm")
-
-                # Acquire image
-                """
-                    ================================
-                    We can apply our save logic here
-                    ================================
-                """
-                self.camera.AcquireImage(step + 1)
-                self.log_message("INFO", "ScanMode", "Image acquired", f"Position: {current_position} mm")
-
-            self.log_message("INFO", "ScanMode", "Scan complete", "")
-        except ValueError:
-            self.log_message("ERROR", "ScanMode", "Invalid input", "Please enter valid numbers for start position, target position, and step size")
-        except Exception as e:
-            self.log_message("ERROR", "ScanMode", "Scan failed", str(e))
-
-    def log_message(self, level, component, message, details=""):
-        logger = level
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-        row_position = self.log_table.rowCount()
-        self.log_table.insertRow(row_position)
-        self.log_table.setItem(row_position, 0, QTableWidgetItem(timestamp))
-        self.log_table.setItem(row_position, 1, QTableWidgetItem(logger))
-        self.log_table.setItem(row_position, 2, QTableWidgetItem(component))
-        self.log_table.setItem(row_position, 3, QTableWidgetItem(message))
-        self.log_table.setItem(row_position, 4, QTableWidgetItem(details))
-        self.log_table.scrollToBottom()
-
-    def UpdateFrame(self):
-        try:
-            if hasattr(self, 'camera') and hasattr(self.camera, 'cam'):
-                frame, width, height = self.camera.GetFrame()
-                if frame is not None:
-                    bytes_per_line = 3 * width
-                    q_image = QImage(frame.data, width, height, bytes_per_line, QImage.Format_RGB888)
-                    pixmap = QPixmap.fromImage(q_image)
-                    self.image_label.setPixmap(pixmap.scaled(self.image_label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
-        except PySpin.SpinnakerException as ex:
-            self.log_message("ERROR", "CameraCapture", "Frame acquisition failed", str(ex))
-        except AttributeError:
-            # Camera is already disconnected, stop the timer
-            self.timer.stop()
-
-    def UpdatePositions(self):
-        try:
-            position_x = self.mask_motor.GetPosition(self.mask_motor.motor_x)
-            position_y = self.mask_motor.GetPosition(self.mask_motor.motor_y)
-            position_z = self.mask_motor.GetPosition(self.mask_motor.motor_z)
-            self.position_label_x.setText(f"X: {position_x} mm")
-            self.position_label_y.setText(f"Y: {position_y} mm")
-            self.position_label_z.setText(f"Z: {position_z} mm")
-        except Exception as e:
-            self.log_message("ERROR", "PositionUpdate", "Failed to update positions", str(e))
-
-    def ApplySettings(self):
-        try:
-            gain_value = float(self.gain_input.text())
-            exposure_time = float(self.exposure_input.text())
-            
-            if self.camera.SetCameraSettings(gain_value, exposure_time):
-                self.settings['gain'] = gain_value
-                self.settings['exposure_time'] = exposure_time
-                
-                self.SaveSettings()
-                
-                self.log_message("INFO", "CameraSettings", "Settings applied and saved successfully")
-            else:
-                self.log_message("ERROR", "CameraSettings", "Failed to apply settings")
-        except ValueError:
-            self.log_message("ERROR", "CameraSettings", "Invalid input", "Please enter valid numbers for gain and exposure time")
 
     def InitHardware(self):
         try:
@@ -341,7 +247,250 @@ class CameraGUI(QMainWindow):
             self.position_timer.start(500)  # Update positions every second
         except Exception as e:
             self.log_message("ERROR", "Initialization", "Failed to initialize hardware", str(e))
+
+
+    def InitCameraSettings(self):
+        # Camera Settings
+        settings_group = QGroupBox("Camera Settings")
+        settings_layout = QFormLayout()
+        settings_group.setLayout(settings_layout)
+        
+        # Gain setting
+        self.gain_input = QLineEdit(str(self.settings['gain']))
+        settings_layout.addRow("Gain:", self.gain_input)
+
+        # Exposure time setting
+        self.exposure_input = QLineEdit(str(self.settings['exposure_time']))
+        settings_layout.addRow("Exposure Time (μs):", self.exposure_input)
+
+        # Apply settings button
+        self.apply_settings_btn = QPushButton("Apply Settings")
+        self.apply_settings_btn.clicked.connect(self.ApplySettings)
+        settings_layout.addRow(self.apply_settings_btn)
+
+        # Add the settings group to the bottom of the control panel
+        self.control_panel.layout().addWidget(settings_group)
+
+
+    def LoadSettings(self):
+        try:
+            with open(SETTINGS_FILE, 'r') as f:
+                return json.load(f)
+        except FileNotFoundError:
+            return {
+                'exposure_time': 1400,
+                'gain': 0
+            }
+        
+
+    def SaveSettings(self):
+        with open(SETTINGS_FILE, 'w') as f:
+            json.dump(self.settings, f)
+        
+
+    def SaveStepSize(self, axis):
+        if axis == "XY":
+            step_size = float(self.xy_step_size_input.text())
+            self.mask_motor.SetJogParams(self.mask_motor.motor_x, step_size)
+            self.mask_motor.SetJogParams(self.mask_motor.motor_y, step_size)
+            self.log_message("INFO", "MotorControl", "XY Jog step size updated", f"New step size: {step_size} mm")
+        elif axis == "Z":
+            step_size = float(self.z_step_size_input.text())
+            self.mask_motor.SetJogParams(self.mask_motor.motor_z, step_size)
+            self.log_message("INFO", "MotorControl", "Z Jog step size updated", f"New step size: {step_size} mm")
+
+
+    def JogMotor(self, axis, direction):
+        motor = getattr(self.mask_motor, f"motor_{axis.lower()}")
+        if direction == "forward":
+            self.mask_motor.ForwardJogMotor(motor)
+            self.log_message("INFO", "MotorControl", f"{axis} motor jogged forward", "Forward")
+        elif direction == 'backward':
+            self.mask_motor.BackwardJogMotor(motor)
+            self.log_message("INFO", "MotorControl", f"{axis} motor jogged backward", "Backward")
+
+
+    def StartMove(self, axis):
+        try:
+            motor = getattr(self.mask_motor, f"motor_{axis.lower()}")
+
+            # Start move in a separate thread
+            move_thread = threading.Thread(target=self.MoveThread, args=(axis, motor))
+            move_thread.start()
+
+        except ValueError:
+            self.log_message("ERROR", "MotorControl", "Invalid input", "Please enter valid numbers for start position, target position, and step size")
+        except Exception as e:
+            self.log_message("ERROR", "MotorControl", "Move failed", str(e))
+
+
+    def MoveThread(self, axis, motor):
+        try:
+            position_input = getattr(self, f"{axis.lower()}_position_input")
+            position = float(position_input.text())
+            self.mask_motor.MoveMotor(motor, position, axis)
+            self.log_message("INFO", "MotorControl", f"{axis} motor moved to absolute position", f"Position: {position} mm")
+
+        except ValueError:
+            self.log_message("ERROR", "MotorControl", "Invalid input", "Please enter valid number", "Range: 0 - 50")
+        except Exception as e:
+            self.log_message("ERROR", "MotorControl", "Move failed", str(e))
+
+
+    def StartScan(self):
+        try:
+            start_position = float(self.start_position_input.text())
+            target_position = float(self.target_position_input.text())
+            step_size = float(self.scan_step_size_input.text())
+
+            # Start scan in a separate thread
+            scan_thread = threading.Thread(target=self.ScanThread, args=(start_position, target_position, step_size))
+            scan_thread.start()
+
+        except ValueError:
+            self.log_message("ERROR", "ScanMode", "Invalid input", "Please enter valid numbers for start position, target position, and step size")
+        except Exception as e:
+            self.log_message("ERROR", "ScanMode", "Scan failed", str(e))
+
+
+    def ScanThread(self, start_position, target_position, step_size):
+        try: 
+            current_motor = self.mask_motor.motor_z
+            axis = "Z"
+
+            # Save step size
+            self.mask_motor.SetJogParams(current_motor, step_size)
+            self.log_message("INFO", "ScanMode", f"Jog step size set for {axis} scan", f"Step size: {step_size} mm")
+
+            self.mask_motor.MoveMotor(current_motor, start_position, axis)
+
+            # Calculate the number of steps
+            num_steps = int(abs(target_position - start_position) / step_size)
+
+            # Determine the direction of scan
+            direction = "forward" if target_position > start_position else "backward"
+
+            for step in range(num_steps + 1):
+                if step == 0:
+                    self.camera.AcquireImage(step + 1)
+                    current_position = self.mask_motor.GetPosition(current_motor)
+                    self.log_message("INFO", "ScanMode", "Image acquired", f"Position: {current_position} mm")
+                else:
+                    if direction == "forward":
+                        self.mask_motor.ForwardJogMotor(current_motor)
+                    else:
+                        self.mask_motor.BackwardJogMotor(current_motor)
+
+                    current_position = self.mask_motor.GetPosition(current_motor)
+                    #self.log_message("INFO", "ScanMode", "Motor jogged to position", f"Position: {current_position} mm")
+
+                    # Acquire image
+                    """
+                        ================================
+                        We can apply our save logic here
+                        ================================
+                    """
+                    self.camera.AcquireImage(step + 1)
+                    self.log_message("INFO", "ScanMode", "Image acquired", f"Position: {current_position} mm")
+                            # Update progress
+                progress_value = int((step / num_steps) * 100)
+                self.progress_signal.emit(progress_value)
+
+            # Reset progress bar
+            self.log_message("INFO", "ScanMode", "Scan complete", "")
+            self.progress_signal.emit(0)
+        except ValueError:
+            self.log_message("ERROR", "ScanMode", "Invalid input", "Please enter valid numbers for start position, target position, and step size")
+        except Exception as e:
+            self.log_message("ERROR", "ScanMode", "Scan failed", str(e))
             
+
+    def log_message(self, level, component, message, details=""):
+        logger = level
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+        row_position = self.log_table.rowCount()
+        self.log_table.insertRow(row_position)
+        self.log_table.setItem(row_position, 0, QTableWidgetItem(timestamp))
+        self.log_table.setItem(row_position, 1, QTableWidgetItem(logger))
+        self.log_table.setItem(row_position, 2, QTableWidgetItem(component))
+        self.log_table.setItem(row_position, 3, QTableWidgetItem(message))
+        self.log_table.setItem(row_position, 4, QTableWidgetItem(details))
+        self.log_table.scrollToBottom()
+
+
+    def UpdateFrame(self):
+        try:
+            if hasattr(self, 'camera') and hasattr(self.camera, 'cam'):
+                frame, width, height = self.camera.GetFrame()
+                if frame is not None:
+                    bytes_per_line = 3 * width
+                    q_image = QImage(frame.data, width, height, bytes_per_line, QImage.Format_RGB888)
+                    pixmap = QPixmap.fromImage(q_image)
+                    self.image_label.setPixmap(pixmap.scaled(self.image_label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        except PySpin.SpinnakerException as ex:
+            self.log_message("ERROR", "CameraCapture", "Frame acquisition failed", str(ex))
+        except AttributeError:
+            # Camera is already disconnected, stop the timer
+            self.timer.stop()
+
+
+    def UpdateProgressBar(self, value):
+        self.progress_bar.setValue(value)
+
+
+    def UpdatePositions(self):
+        try:
+            position_x = self.mask_motor.GetPosition(self.mask_motor.motor_x)
+            position_y = self.mask_motor.GetPosition(self.mask_motor.motor_y)
+            position_z = self.mask_motor.GetPosition(self.mask_motor.motor_z)
+            self.position_label_x.setText(f"X: {position_x} mm")
+            self.position_label_y.setText(f"Y: {position_y} mm")
+            self.position_label_z.setText(f"Z: {position_z} mm")
+        except Exception as e:
+            self.log_message("ERROR", "PositionUpdate", "Failed to update positions", str(e))
+
+
+    def ApplySettings(self):
+        try:
+            gain_value = float(self.gain_input.text())
+            exposure_time = float(self.exposure_input.text())
+            
+            if self.camera.SetCameraSettings(gain_value, exposure_time):
+                self.settings['gain'] = gain_value
+                self.settings['exposure_time'] = exposure_time
+                
+                self.SaveSettings()
+                
+                self.log_message("INFO", "CameraSettings", "Settings applied and saved successfully")
+            else:
+                self.log_message("ERROR", "CameraSettings", "Failed to apply settings")
+        except ValueError:
+            self.log_message("ERROR", "CameraSettings", "Invalid input", "Please enter valid numbers for gain and exposure time")
+
+    def DeinitHardware(self):
+        self.timer.stop()
+        self.position_timer.stop()
+
+        if hasattr(self, 'camera'):
+            self.camera.DisconnectCamera()
+
+        if hasattr(self, 'mask_motor'):
+            self.mask_motor.DisconnectAllMotors()
+
+        self.log_message("INFO", "Deinitialize", "Disconnected camera and motors", "Waiting to Initialize Hardware")
+
+    def StartHardware(self):
+        self.InitHardware()  # Initialize hardware
+        self.start_btn.setEnabled(False)
+        self.stop_btn.setEnabled(True)
+
+
+    def StopHardware(self):
+        self.DeinitHardware()  # This will trigger closeEvent
+        self.start_btn.setEnabled(True)
+        self.stop_btn.setEnabled(False)
+
+
     def closeEvent(self, event):
         self.timer.stop()
         self.position_timer.stop()
@@ -359,8 +508,6 @@ def main():
     app = QApplication(sys.argv)
     window = CameraGUI()
     window.show()
-    time.sleep(3)
-    QTimer.singleShot(0, window.InitHardware)
     sys.exit(app.exec_())
 
 if __name__ == '__main__':

@@ -1,3 +1,15 @@
+"""
+    Josue B. Castellanos 
+    6/17/24 -- 8/6/24
+    https://github.com/Josue-Castellanos/ALS_Motor_Controls
+    (c) Lawrence Berkelay National Laboratory, 2024
+    python file: jckcube.py
+
+    **This version is only compatible with PySpin for Spinnaker 3.0.0.118 and Python 3.10**
+    **If your Matlab/LabView supports newer versions of Spinnaker (like 3.2.0.62)**
+    **I would recommend updating to that version, for both Spinnaker/PySpin**
+"""
+
 import time
 import clr 
 
@@ -124,6 +136,10 @@ class MaskMotor:
     def ForwardJogMotor(self, motor):
         self.log("INFO", "MotorControl", "Jogging motor forward", "")
         motor.MoveJog(MotorDirection.Forward, 60000) # type: ignore # Wait time in milliseconds
+        # Wait for the device to complete the move
+        while motor.Status.IsMoving:
+            time.sleep(0.1)  # Check every 100ms
+            
         self.log("INFO", "MotorControl", "Motor jog completed", "Forward")
 
     def BackwardJogMotor(self, motor):
@@ -134,8 +150,10 @@ class MaskMotor:
     def DisconnectMotor(self, motor):
         motor.StopPolling()
         motor.Disconnect(False)
+        self.log("INFO", "MotorControl", f"Disconnected Motor {motor}")
 
     def DisconnectAllMotors(self):
         self.DisconnectMotor(self.motor_x)
         self.DisconnectMotor(self.motor_y)
         self.DisconnectMotor(self.motor_z)
+
