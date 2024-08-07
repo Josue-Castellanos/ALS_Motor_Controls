@@ -1,1 +1,1 @@
-{"exposure_time": 0.0003, "gain": 0, "default_motor": "Z"}
+{"exposure_time": 1400, "gain": 0}
