@@ -1,1 +1,1 @@
-{"exposure_time": 1400, "gain": 0}
+{"exposure_time": 1400.0, "gain": 0.0}

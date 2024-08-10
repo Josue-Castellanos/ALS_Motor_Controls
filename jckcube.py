@@ -4,10 +4,6 @@
     https://github.com/Josue-Castellanos/ALS_Motor_Controls
     (c) Lawrence Berkelay National Laboratory, 2024
     python file: jckcube.py
-
-    **This version is only compatible with PySpin for Spinnaker 3.0.0.118 and Python 3.10**
-    **If your Matlab/LabView supports newer versions of Spinnaker (like 3.2.0.62)**
-    **I would recommend updating to that version, for both Spinnaker/PySpin**
 """
 
 import time
